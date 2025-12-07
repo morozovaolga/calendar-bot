@@ -1,0 +1,42 @@
+name: Daily Literary Calendar Bot
+
+on:
+  schedule:
+    # Запуск каждый день в 9:00 UTC (12:00 по Москве)
+    - cron: '0 9 * * *'
+  workflow_dispatch:  # Позволяет запускать вручную
+
+jobs:
+  send-daily-digest:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements_bot.txt
+      
+      - name: Send daily digest
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GRAPHQL_ENDPOINT: ${{ secrets.GRAPHQL_ENDPOINT }}
+          GROUP_CHAT_ID: ${{ secrets.GROUP_CHAT_ID }}
+          CALENDAR_URL: ${{ secrets.CALENDAR_URL }}
+        run: |
+          python send_daily.py
+      
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Daily digest failed to send"
+          # Можно добавить уведомление в Telegram или email
+

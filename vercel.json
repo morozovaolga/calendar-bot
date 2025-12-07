@@ -1,0 +1,18 @@
+{
+  "functions": {
+    "api/*.js": {
+      "maxDuration": 60
+    },
+    "api/*.py": {
+      "runtime": "python3.9",
+      "maxDuration": 60
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/send-daily",
+      "schedule": "0 9 * * *"
+    }
+  ]
+}
+

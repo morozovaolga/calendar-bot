@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>📚 Литературный календарь</h1>
+
+<a href="{{ url_for('add_event') }}" class="btn">➕ Добавить событие</a>
+
+<div class="events-list">
+    {% if events %}
+        {% for event in events %}
+        <div class="event-card">
+            <h3>{{ event.title }}</h3>
+            <div class="date">📅 {{ event.event_date.strftime('%d.%m.%Y') }}</div>
+            {% if event.description %}
+            <div class="description">{{ event.description }}</div>
+            {% endif %}
+            {% if event.reference_name %}
+            <div class="reference">
+                {% if event.event_type == 'author' %}
+                    👤 Автор: {{ event.reference_name }}
+                {% elif event.event_type == 'tag' %}
+                    🏷️ Тег: {{ event.reference_name }}
+                {% elif event.event_type == 'category' %}
+                    📂 Категория: {{ event.reference_name }}
+                {% endif %}
+            </div>
+            {% endif %}
+            <div class="event-actions">
+                <a href="{{ url_for('edit_event', event_id=event.id) }}" class="btn">✏️ Редактировать</a>
+                <a href="{{ url_for('delete_event', event_id=event.id) }}" class="btn btn-danger" 
+                   onclick="return confirm('Удалить событие?')">🗑️ Удалить</a>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <p>Событий пока нет. Добавьте первое событие!</p>
+    {% endif %}
+</div>
+{% endblock %}
+

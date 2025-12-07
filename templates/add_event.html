@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Добавить событие - Литературный календарь{% endblock %}
+
+{% block content %}
+<h1>➕ Добавить новое событие</h1>
+
+<form method="POST" action="{{ url_for('add_event') }}">
+    <div class="form-group">
+        <label for="title">Название события *</label>
+        <input type="text" id="title" name="title" required 
+               placeholder="Например: Антон Чехов родился в 1860 году">
+    </div>
+    
+    <div class="form-group">
+        <label for="description">Краткое описание</label>
+        <textarea id="description" name="description" 
+                  placeholder="Дополнительная информация о событии"></textarea>
+    </div>
+    
+    <div class="form-group">
+        <label for="event_date">Дата события *</label>
+        <input type="date" id="event_date" name="event_date" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="event_type">Тип события</label>
+        <select id="event_type" name="event_type" onchange="toggleReferenceFields()">
+            <option value="custom">Произвольное событие</option>
+            <option value="author">Связано с автором</option>
+            <option value="tag">Связано с тегом</option>
+            <option value="category">Связано с категорией</option>
+        </select>
+    </div>
+    
+    <div class="form-group" id="reference_group" style="display: none;">
+        <label for="reference_name">Выберите из списка</label>
+        <select id="reference_select" name="reference_select" onchange="updateReference()">
+            <option value="">-- Выберите --</option>
+        </select>
+        <input type="hidden" id="reference_uuid" name="reference_uuid">
+        <input type="hidden" id="reference_name" name="reference_name">
+    </div>
+    
+    <button type="submit" class="btn btn-success">💾 Сохранить событие</button>
+    <a href="{{ url_for('index') }}" class="btn">❌ Отмена</a>
+</form>
+
+<script>
+    // Загружаем данные при изменении типа события
+    document.getElementById('event_type').addEventListener('change', function() {
+        const eventType = this.value;
+        const referenceGroup = document.getElementById('reference_group');
+        const referenceSelect = document.getElementById('reference_select');
+        
+        if (eventType === 'custom') {
+            referenceGroup.style.display = 'none';
+            return;
+        }
+        
+        referenceGroup.style.display = 'block';
+        referenceSelect.innerHTML = '<option value="">Загрузка...</option>';
+        
+        // Загружаем данные из API
+        let apiUrl = '';
+        if (eventType === 'author') {
+            apiUrl = '/api/authors';
+        } else if (eventType === 'tag') {
+            apiUrl = '/api/tags';
+        } else if (eventType === 'category') {
+            apiUrl = '/api/categories';
+        }
+        
+        fetch(apiUrl)
+            .then(response => response.json())
+            .then(data => {
+                referenceSelect.innerHTML = '<option value="">-- Выберите --</option>';
+                const items = data[eventType + 's'] || [];
+                items.forEach(item => {
+                    const option = document.createElement('option');
+                    option.value = item.uuid;
+                    option.textContent = item.name;
+                    option.dataset.name = item.name;
+                    referenceSelect.appendChild(option);
+                });
+            })
+            .catch(error => {
+                console.error('Ошибка загрузки данных:', error);
+                referenceSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
+            });
+    });
+    
+    function updateReference() {
+        const select = document.getElementById('reference_select');
+        const selectedOption = select.options[select.selectedIndex];
+        
+        if (selectedOption.value) {
+            document.getElementById('reference_uuid').value = selectedOption.value;
+            document.getElementById('reference_name').value = selectedOption.dataset.name || selectedOption.textContent;
+        } else {
+            document.getElementById('reference_uuid').value = '';
+            document.getElementById('reference_name').value = '';
+        }
+    }
+    
+    function toggleReferenceFields() {
+        const eventType = document.getElementById('event_type').value;
+        const referenceGroup = document.getElementById('reference_group');
+        
+        if (eventType === 'custom') {
+            referenceGroup.style.display = 'none';
+        } else {
+            referenceGroup.style.display = 'block';
+            // Триггерим загрузку данных
+            document.getElementById('event_type').dispatchEvent(new Event('change'));
+        }
+    }
+    
+    // Устанавливаем сегодняшнюю дату по умолчанию
+    document.getElementById('event_date').valueAsDate = new Date();
+</script>
+{% endblock %}
+
