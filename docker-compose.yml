@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  literary-bot:
+    build: .
+    restart: always
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - GRAPHQL_ENDPOINT=${GRAPHQL_ENDPOINT}
+      - GROUP_CHAT_ID=${GROUP_CHAT_ID}
+      - CALENDAR_URL=${CALENDAR_URL}
+    volumes:
+      - ./logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
