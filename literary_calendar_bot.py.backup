@@ -618,24 +618,29 @@ class LiteraryCalendarBot:
 async def main():
     """Главная функция для запуска бота"""
     
-    # Импортируем конфигурацию
-    from literary_calendar_bot_config import (
-        BOT_TOKEN,
-        CALENDAR_URL,
-        GRAPHQL_ENDPOINT,
-        GROUP_CHAT_ID,
-        SEND_HOUR,
-        TIMEZONE
-    )
-
+    # ===== НАСТРОЙКИ =====
+    # Получите токен бота у @BotFather в Telegram
+    BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+    
+    # URL календаря Yandex Calendar
+    CALENDAR_URL = "https://calendar.yandex.ru/export/html.xml?private_token=<REDACTED>&tz_id=Europe/Moscow&limit=90"
+    
+    # URL GraphQL API (нужно узнать у администраторов API)
+    GRAPHQL_ENDPOINT = "https://your-api-endpoint.com/graphql"
+    
+    # ID группы в Telegram (можно получить, добавив бота @userinfobot в группу)
+    GROUP_CHAT_ID = "YOUR_GROUP_CHAT_ID"
+    # ======================
+    
     bot = LiteraryCalendarBot(
         bot_token=BOT_TOKEN,
         calendar_url=CALENDAR_URL,
         graphql_endpoint=GRAPHQL_ENDPOINT,
-        group_chat_id=GROUP_CHAT_ID,
-        timezone=TIMEZONE,
-        send_hour=SEND_HOUR
+        group_chat_id=GROUP_CHAT_ID
     )
+    
+    # Запускаем ежедневную рассылку
+    await bot.run_daily()
 
 
 if __name__ == "__main__":
