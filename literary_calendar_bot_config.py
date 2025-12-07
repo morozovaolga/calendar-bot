@@ -10,13 +10,10 @@ BOT_TOKEN = "<REDACTED_BOT_TOKEN>"
 GRAPHQL_ENDPOINT = "https://example.com/graphql"
 
 # ID группы в Telegram (можно получить через @userinfobot)
-GROUP_CHAT_ID = "5016711578"
-
-# URL календаря Yandex Calendar (если используется)
-CALENDAR_URL = "https://calendar.yandex.ru/export/html.xml?private_token=<REDACTED>&tz_id=Europe/Moscow&limit=90"
+GROUP_CHAT_ID = "-3330214920"
 
 # Время отправки ежедневного дайджеста (в часах, по умолчанию 12:00 дня)
-SEND_HOUR = 12
+SEND_HOUR = 13
 
 # Часовой пояс
 TIMEZONE = "Europe/Moscow"
