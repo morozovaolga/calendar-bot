@@ -542,13 +542,22 @@ class LiteraryCalendarBot:
             
             return today_events
     
-    async def send_daily_digest(self):
+    async def send_daily_digest(self, chat_id=None):
         """Отправляет ежедневную рассылку"""
+        if chat_id is None:
+            chat_id = self.group_chat_id
+            
         try:
             events = await self.get_today_events()
             
             if not events:
                 logger.info("Нет событий на сегодня")
+                # Отправляем сообщение, что событий нет
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text="На сегодня нет запланированных литературных событий.",
+                    parse_mode='HTML'
+                )
                 return
             
             # Отправляем каждое событие отдельным сообщением
@@ -579,7 +588,7 @@ class LiteraryCalendarBot:
                 
                 try:
                     await self.bot.send_message(
-                        chat_id=self.group_chat_id,
+                        chat_id=chat_id,
                         text=message,
                         parse_mode='HTML',
                         disable_web_page_preview=False
