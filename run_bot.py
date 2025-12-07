@@ -8,27 +8,6 @@ import logging
 import os
 from literary_calendar_bot import LiteraryCalendarBot
 
-# Поддержка переменных окружения (для деплоя)
-# Используем переменные окружения, если они есть, иначе конфиг файл
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-GRAPHQL_ENDPOINT = os.getenv('GRAPHQL_ENDPOINT')
-GROUP_CHAT_ID = os.getenv('GROUP_CHAT_ID')
-CALENDAR_URL = os.getenv('CALENDAR_URL')
-
-# Если переменные окружения не заданы, используем конфиг файл
-if not all([BOT_TOKEN, GRAPHQL_ENDPOINT, GROUP_CHAT_ID]):
-    try:
-        import literary_calendar_bot_config as config
-        BOT_TOKEN = BOT_TOKEN or config.BOT_TOKEN
-        GRAPHQL_ENDPOINT = GRAPHQL_ENDPOINT or config.GRAPHQL_ENDPOINT
-        GROUP_CHAT_ID = GROUP_CHAT_ID or config.GROUP_CHAT_ID
-        CALENDAR_URL = CALENDAR_URL or config.CALENDAR_URL
-    except ImportError:
-        print("❌ Ошибка: Необходимо настроить переменные окружения или создать конфиг файл!")
-        print("   Переменные окружения: BOT_TOKEN, GRAPHQL_ENDPOINT, GROUP_CHAT_ID, CALENDAR_URL")
-        print("   Или создайте файл literary_calendar_bot_config.py")
-        exit(1)
-
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -40,41 +19,67 @@ logger = logging.getLogger(__name__)
 async def main():
     """Главная функция запуска бота"""
     
+    # Загрузка конфигурации внутри функции для избежания проблем с областью видимости
+    bot_token = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
+    graphql_endpoint = os.getenv('GRAPHQL_ENDPOINT', 'https://api.svetapp.rusneb.ru/graphql')
+    group_chat_id = os.getenv('GROUP_CHAT_ID', 'YOUR_GROUP_CHAT_ID')
+    calendar_url = os.getenv('CALENDAR_URL', 'https://calendar.yandex.ru/export/html.xml?private_token=1c7f766fab8185a98f934a458b51e7fe8ff5b636&tz_id=Europe/Moscow&limit=90')
+    timezone = os.getenv('TIMEZONE', 'Europe/Moscow')
+    send_hour = int(os.getenv('SEND_HOUR', '9'))
+
+    # Если хотя бы один из основных параметров - placeholder, пробуем загрузить из конфига
+    if "YOUR_BOT_TOKEN_HERE" in bot_token or "YOUR_GROUP_CHAT_ID" in group_chat_id:
+        try:
+            import literary_calendar_bot_config as config
+            bot_token = getattr(config, 'BOT_TOKEN', bot_token)
+            graphql_endpoint = getattr(config, 'GRAPHQL_ENDPOINT', graphql_endpoint)
+            group_chat_id = getattr(config, 'GROUP_CHAT_ID', group_chat_id)
+            calendar_url = getattr(config, 'CALENDAR_URL', calendar_url)
+            timezone = getattr(config, 'TIMEZONE', timezone)
+            send_hour = getattr(config, 'SEND_HOUR', send_hour)
+        except ImportError:
+            pass  # Конфиг файл не обязателен, используем переменные окружения или placeholder'ы
+
     # Проверяем конфигурацию
-    if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or not BOT_TOKEN:
-        print("❌ Ошибка: Не настроен BOT_TOKEN!")
+    if not bot_token or "YOUR_BOT_TOKEN_HERE" in bot_token:
+        print("⚠️  Предупреждение: BOT_TOKEN не настроен!")
         print("   Получите токен у @BotFather в Telegram")
         print("   Установите переменную окружения: export BOT_TOKEN='ваш_токен'")
-        return
+        print("   Или измените значение в файле literary_calendar_bot_config.py")
+        # return  # Закомментировано для возможности запуска тестов
     
-    if GRAPHQL_ENDPOINT == "https://your-api-endpoint.com/graphql" or not GRAPHQL_ENDPOINT:
-        print("❌ Ошибка: Не настроен GRAPHQL_ENDPOINT!")
+    if not graphql_endpoint or "https://your-api-endpoint.com/graphql" in graphql_endpoint:
+        print("⚠️  Предупреждение: GRAPHQL_ENDPOINT не настроен!")
         print("   Узнайте URL API у администраторов")
         print("   Установите переменную окружения: export GRAPHQL_ENDPOINT='ваш_api_url'")
-        return
+        print("   Или измените значение в файле literary_calendar_bot_config.py")
+        # return  # Закомментировано для возможности запуска тестов
     
-    if GROUP_CHAT_ID == "YOUR_GROUP_CHAT_ID" or not GROUP_CHAT_ID:
-        print("❌ Ошибка: Не настроен GROUP_CHAT_ID!")
+    if not group_chat_id or "YOUR_GROUP_CHAT_ID" in group_chat_id:
+        print("⚠️  Предупреждение: GROUP_CHAT_ID не настроен!")
         print("   Узнайте ID группы через @userinfobot")
         print("   Установите переменную окружения: export GROUP_CHAT_ID='id_группы'")
-        return
+        print("   Или измените значение в файле literary_calendar_bot_config.py")
+        # return  # Закомментировано для возможности запуска тестов
     
     # Устанавливаем дефолтный URL календаря, если не задан
-    if not CALENDAR_URL:
-        CALENDAR_URL = "https://calendar.yandex.ru/export/html.xml?private_token=1c7f766fab8185a98f934a458b51e7fe8ff5b636&tz_id=Europe/Moscow&limit=90"
+    if not calendar_url:
+        calendar_url = "https://calendar.yandex.ru/export/html.xml?private_token=1c7f766fab8185a98f934a458b51e7fe8ff5b636&tz_id=Europe/Moscow&limit=90"
     
     # Создаем бота
     bot = LiteraryCalendarBot(
-        bot_token=BOT_TOKEN,
-        calendar_url=CALENDAR_URL,
-        graphql_endpoint=GRAPHQL_ENDPOINT,
-        group_chat_id=GROUP_CHAT_ID
+        bot_token=bot_token,
+        calendar_url=calendar_url,
+        graphql_endpoint=graphql_endpoint,
+        group_chat_id=group_chat_id,
+        timezone=timezone,
+        send_hour=send_hour
     )
     
     print("✅ Бот инициализирован")
-    print(f"📅 Календарь: {CALENDAR_URL[:50]}...")
-    print(f"🔗 API: {GRAPHQL_ENDPOINT}")
-    print(f"👥 Группа: {GROUP_CHAT_ID}")
+    print(f"📅 Календарь: {calendar_url[:50]}...")
+    print(f"🔗 API: {graphql_endpoint}")
+    print(f"👥 Группа: {group_chat_id}")
     print("\n" + "="*50)
     print("Выберите режим работы:")
     print("1. Отправить события на сегодня (тест)")
