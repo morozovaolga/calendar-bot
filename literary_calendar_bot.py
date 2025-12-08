@@ -618,7 +618,7 @@ class LiteraryCalendarBot:
                 now = datetime.now()
                 if now.hour == self.send_hour and now.minute == 0:
                     # Здесь нужен chat_id для отправки
-                    logger.warning("Автоматическая рассылка требует chat_id. Используйте /send_events")
+                    logger.warning("Автоматическая рассылка требует chat_id. Используйте /send_events_for_today")
                     await asyncio.sleep(3600)
                 else:
                     await asyncio.sleep(60)
