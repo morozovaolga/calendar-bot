@@ -4,16 +4,29 @@
 """
 
 # Токен Telegram бота (получите у @BotFather)
-BOT_TOKEN = "<REDACTED_BOT_TOKEN>"
+# Установите через переменную окружения: export BOT_TOKEN='...' (Linux/macOS) или $env:BOT_TOKEN='...' (PowerShell)
+import os
+BOT_TOKEN = os.getenv('BOT_TOKEN', '')
 
-# URL GraphQL API сервиса "Свет"
-GRAPHQL_ENDPOINT = "https://example.com/graphql"
+# URL GraphQL API (если требуется)
+GRAPHQL_ENDPOINT = os.getenv('GRAPHQL_ENDPOINT', '')
 
-# ID группы в Telegram (можно получить через @userinfobot)
-GROUP_CHAT_ID = "-3330214920"
+# URL календаря (если требуется)
+CALENDAR_URL = os.getenv('CALENDAR_URL', '')
 
-# Время отправки ежедневного дайджеста (в часах, по умолчанию 12:00 дня)
-SEND_HOUR = 13
+DB_PATH = os.getenv('DB_PATH', 'literary_events.db')
+
+# Время отправки ежедневного дайджеста (в часах, по умолчанию 13:00)
+SEND_HOUR = int(os.getenv('SEND_HOUR', '13'))
 
 # Часовой пояс
-TIMEZONE = "Europe/Moscow"
+TIMEZONE = os.getenv('TIMEZONE', 'Europe/Moscow')
+
+# Максимальное количество книг в одном сообщении
+MAX_BOOKS_PER_EVENT = 6
+
+# Задержка между сообщениями (в секундах)
+MESSAGE_DELAY = 1
+
+# Логирование
+LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR
