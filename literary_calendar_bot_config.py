@@ -9,7 +9,7 @@ import os
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 # URL GraphQL API (если требуется)
-GRAPHQL_ENDPOINT = os.getenv("GRAPHQL_ENDPOINT", "https://example.com/graphql")
+GRAPHQL_ENDPOINT = os.getenv("GRAPHQL_ENDPOINT", "")
 
 # URL календаря (если требуется)
 CALENDAR_URL = os.getenv("CALENDAR_URL", "")
