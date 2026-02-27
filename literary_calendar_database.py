@@ -5,35 +5,43 @@
 
 import sqlite3
 import csv
-from datetime import datetime
-from typing import List, Dict, Optional
+import re
+from datetime import datetime, date
+from typing import List, Dict, Optional, Union
 import json
 
 
 class LiteraryCalendarDatabase:
     """База данных литературного календаря"""
-    
+
     def __init__(self, db_path: str = None):
         # Используем путь из конфига, если не указан явно
         if db_path is None:
             try:
                 from literary_calendar_bot_config import DB_PATH
+
                 db_path = DB_PATH
             except (ImportError, AttributeError):
                 db_path = "literary_events.db"
-        
+
         self.db_path = db_path
         self.conn = None
         self.init_database()
-    
+
     def init_database(self):
         """Инициализация базы данных"""
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
         cursor = self.conn.cursor()
-        
+
+        # Важно для SQLite: включаем внешние ключи и выставляем прагмы для стабильной работы
+        cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.execute("PRAGMA busy_timeout = 5000")
+        cursor.execute("PRAGMA journal_mode = WAL")
+
         # Таблица событий
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_date TEXT NOT NULL,  -- Формат: MM-DD (месяц-день для ежегодных событий)
@@ -42,13 +50,15 @@ class LiteraryCalendarDatabase:
                 description TEXT,          -- Описание события
                 author_name TEXT,          -- Имя автора (если применимо)
                 book_title TEXT,           -- Название книги (если применимо)
-                year INTEGER,              -- Год события (NULL если ежегодное)
+                year TEXT,                 -- ISO дата (YYYY-MM-DD/YY) рождения автора или начала события
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """)
-        
+        """
+        )
+
         # Таблица ссылок на API ресурсы (многие-ко-многим)
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS event_references (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_id INTEGER NOT NULL,
@@ -60,29 +70,76 @@ class LiteraryCalendarDatabase:
                 metadata TEXT,                 -- JSON с дополнительными данными (обложка, аннотация и т.д.)
                 FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
             )
-        """)
-        
+        """
+        )
+
         # Индексы для быстрого поиска
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_event_date ON events(event_date)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_event_type ON events(event_type)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_reference_type ON event_references(reference_type)")
-        
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_event_date ON events(event_date)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_event_type ON events(event_type)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reference_type ON event_references(reference_type)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_event_references_event_id ON event_references(event_id)"
+        )
+
         self.conn.commit()
-    
+
+    @staticmethod
+    def normalize_reference_date(value: Union[int, str, datetime, date, None]) -> Optional[str]:
+        """Нормализует значение для колонки year (хранится как текст)."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        value_str = str(value).strip()
+        return value_str or None
+
+    @staticmethod
+    def parse_reference_date(value: Union[str, int, datetime, date, None]) -> Optional[datetime]:
+        """Превращает значение из колонки year в datetime, если возможно."""
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, date):
+            return datetime(value.year, value.month, value.day)
+        value_str = str(value).strip()
+        if not value_str:
+            return None
+
+        for fmt in ("%Y-%m-%d", "%Y-%m", "%Y"):
+            try:
+                return datetime.strptime(value_str, fmt)
+            except ValueError:
+                continue
+
+        if value_str.isdigit() and len(value_str) == 4:
+            return datetime(int(value_str), 1, 1)
+
+        return None
+
     def add_event(
-        self, 
-        month: int, 
-        day: int, 
-        event_type: str, 
+        self,
+        month: int,
+        day: int,
+        event_type: str,
         title: str,
         description: str = None,
         author_name: str = None,
         book_title: str = None,
-        year: int = None
+        year: Union[int, str, datetime, date] = None,
+        commit: bool = True,
     ) -> int:
         """
         Добавляет событие в базу
-        
+
         Args:
             month: Месяц (1-12)
             day: День (1-31)
@@ -91,22 +148,35 @@ class LiteraryCalendarDatabase:
             description: Описание
             author_name: Имя автора
             book_title: Название книги
-            year: Год события (опционально)
-        
+            year: ISO дата события (YYYY-MM-DD/YY) или год рождения автора (опционально)
+
         Returns:
             ID созданного события
         """
         event_date = f"{month:02d}-{day:02d}"
-        
+
+        normalized_year = self.normalize_reference_date(year)
         cursor = self.conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO events (event_date, event_type, title, description, author_name, book_title, year)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (event_date, event_type, title, description, author_name, book_title, year))
-        
-        self.conn.commit()
+        """,
+            (
+                event_date,
+                event_type,
+                title,
+                description,
+                author_name,
+                book_title,
+                normalized_year,
+            ),
+        )
+
+        if commit:
+            self.conn.commit()
         return cursor.lastrowid
-    
+
     def add_reference(
         self,
         event_id: int,
@@ -115,11 +185,12 @@ class LiteraryCalendarDatabase:
         reference_slug: str = None,
         reference_name: str = None,
         priority: int = 0,
-        metadata: Dict = None
+        metadata: Dict = None,
+        commit: bool = True,
     ):
         """
         Добавляет ссылку на API ресурс к событию
-        
+
         Args:
             event_id: ID события
             reference_type: Тип ('author', 'book', 'tag', 'category', 'film', 'article')
@@ -131,99 +202,171 @@ class LiteraryCalendarDatabase:
         """
         cursor = self.conn.cursor()
         metadata_json = json.dumps(metadata) if metadata else None
-        
-        cursor.execute("""
+
+        cursor.execute(
+            """
             INSERT INTO event_references 
             (event_id, reference_type, reference_uuid, reference_slug, reference_name, priority, metadata)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (event_id, reference_type, reference_uuid, reference_slug, reference_name, priority, metadata_json))
-        
-        self.conn.commit()
-    
+        """,
+            (
+                event_id,
+                reference_type,
+                reference_uuid,
+                reference_slug,
+                reference_name,
+                priority,
+                metadata_json,
+            ),
+        )
+
+        if commit:
+            self.conn.commit()
+
     def get_events_by_date(self, month: int, day: int) -> List[Dict]:
         """Получает все события на заданную дату"""
         event_date = f"{month:02d}-{day:02d}"
-        
+
         cursor = self.conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT * FROM events WHERE event_date = ?
             ORDER BY event_type, year DESC
-        """, (event_date,))
-        
+        """,
+            (event_date,),
+        )
+
         events = []
         for row in cursor.fetchall():
             event = dict(row)
             # Получаем все ссылки для этого события
-            event['references'] = self.get_event_references(event['id'])
+            event["references"] = self.get_event_references(event["id"])
             events.append(event)
-        
+
         return events
-    
+
     def get_event_references(self, event_id: int) -> List[Dict]:
         """Получает все ссылки для события"""
         cursor = self.conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT * FROM event_references 
             WHERE event_id = ?
             ORDER BY priority, id
-        """, (event_id,))
-        
+        """,
+            (event_id,),
+        )
+
         references = []
         for row in cursor.fetchall():
             ref = dict(row)
-            if ref['metadata']:
-                ref['metadata'] = json.loads(ref['metadata'])
+            if ref["metadata"]:
+                ref["metadata"] = json.loads(ref["metadata"])
             references.append(ref)
-        
+
         return references
-    
+
+    def get_jubilees_by_year(self, target_year: int) -> List[Dict]:
+        """Возвращает список событий-юбиляров для заданного года.
+
+        Юбиляры — события с заполненным полем `year`, для которых
+        возраст в `target_year` оканчивается на 0 или 5.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM events
+            WHERE year IS NOT NULL AND TRIM(year) != ''
+              AND event_type IN ('birthday', 'день рождения')
+            ORDER BY year ASC
+        """
+        )
+
+        results = []
+        for row in cursor.fetchall():
+            event = dict(row)
+            birth_year = None
+
+            reference_date = self.parse_reference_date(event.get("year"))
+            if reference_date:
+                birth_year = reference_date.year
+
+            if not birth_year:
+                # Извлекаем год из названия события (костыль для исторических названий)
+                year_match = re.search(
+                    r"\b(1[0-9]{3}|2[0-2][0-9]{2})\b", event.get("title", "")
+                )
+                if year_match:
+                    birth_year = int(year_match.group(1))
+
+            age = 0
+            if birth_year:
+                age = target_year - birth_year
+
+            if age > 0 and (age % 10 == 0 or age % 10 == 5):
+                event["age"] = age
+                event["references"] = self.get_event_references(event["id"])
+                results.append(event)
+
+        results.sort(key=lambda e: e["age"], reverse=True)
+        return results
+
     def import_from_csv(self, csv_path: str):
         """
         Импортирует события из CSV файла
-        
+
         Формат CSV:
         month,day,event_type,title,description,author_name,book_title,year,
         reference_type,reference_uuid,reference_slug,reference_name,priority,metadata_json
         """
-        with open(csv_path, 'r', encoding='utf-8') as f:
+        with open(csv_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
-            
-            for row in reader:
-                # Добавляем событие
-                event_id = self.add_event(
-                    month=int(row['month']),
-                    day=int(row['day']),
-                    event_type=row['event_type'],
-                    title=row['title'],
-                    description=row.get('description') or None,
-                    author_name=row.get('author_name') or None,
-                    book_title=row.get('book_title') or None,
-                    year=int(row['year']) if row.get('year') else None
-                )
-                
-                # Добавляем ссылки (если есть)
-                if row.get('reference_type'):
-                    metadata = None
-                    if row.get('metadata_json'):
-                        try:
-                            metadata = json.loads(row['metadata_json'])
-                        except:
-                            pass
-                    
-                    self.add_reference(
-                        event_id=event_id,
-                        reference_type=row['reference_type'],
-                        reference_uuid=row.get('reference_uuid') or None,
-                        reference_slug=row.get('reference_slug') or None,
-                        reference_name=row.get('reference_name') or None,
-                        priority=int(row.get('priority', 0)),
-                        metadata=metadata
+
+            try:
+                self.conn.execute("BEGIN")
+                for row in reader:
+                    # Добавляем событие
+                    event_id = self.add_event(
+                        month=int(row["month"]),
+                        day=int(row["day"]),
+                        event_type=row["event_type"],
+                        title=row["title"],
+                        description=row.get("description") or None,
+                        author_name=row.get("author_name") or None,
+                        book_title=row.get("book_title") or None,
+                        year=row.get("year") or None,
+                        commit=False,
                     )
-    
+
+                    # Добавляем ссылки (если есть)
+                    if row.get("reference_type"):
+                        metadata = None
+                        if row.get("metadata_json"):
+                            try:
+                                metadata = json.loads(row["metadata_json"])
+                            except Exception:
+                                metadata = None
+
+                        self.add_reference(
+                            event_id=event_id,
+                            reference_type=row["reference_type"],
+                            reference_uuid=row.get("reference_uuid") or None,
+                            reference_slug=row.get("reference_slug") or None,
+                            reference_name=row.get("reference_name") or None,
+                            priority=int(row.get("priority", 0)),
+                            metadata=metadata,
+                            commit=False,
+                        )
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                raise
+
     def export_to_csv(self, csv_path: str):
         """Экспортирует события в CSV файл"""
         cursor = self.conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT 
                 e.*,
                 r.reference_type,
@@ -235,37 +378,52 @@ class LiteraryCalendarDatabase:
             FROM events e
             LEFT JOIN event_references r ON e.id = r.event_id
             ORDER BY e.event_date, e.id, r.priority
-        """)
-        
-        with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+        """
+        )
+
+        with open(csv_path, "w", encoding="utf-8", newline="") as f:
             fieldnames = [
-                'month', 'day', 'event_type', 'title', 'description', 
-                'author_name', 'book_title', 'year',
-                'reference_type', 'reference_uuid', 'reference_slug', 
-                'reference_name', 'priority', 'metadata_json'
+                "month",
+                "day",
+                "event_type",
+                "title",
+                "description",
+                "author_name",
+                "book_title",
+                "year",
+                "reference_type",
+                "reference_uuid",
+                "reference_slug",
+                "reference_name",
+                "priority",
+                "metadata_json",
             ]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            
+
             for row in cursor.fetchall():
-                month, day = row['event_date'].split('-')
-                writer.writerow({
-                    'month': month,
-                    'day': day,
-                    'event_type': row['event_type'],
-                    'title': row['title'],
-                    'description': row['description'] or '',
-                    'author_name': row['author_name'] or '',
-                    'book_title': row['book_title'] or '',
-                    'year': row['year'] or '',
-                    'reference_type': row['reference_type'] or '',
-                    'reference_uuid': row['reference_uuid'] or '',
-                    'reference_slug': row['reference_slug'] or '',
-                    'reference_name': row['reference_name'] or '',
-                    'priority': row['priority'] if row['priority'] is not None else '',
-                    'metadata_json': row['metadata'] or ''
-                })
-    
+                month, day = row["event_date"].split("-")
+                writer.writerow(
+                    {
+                        "month": month,
+                        "day": day,
+                        "event_type": row["event_type"],
+                        "title": row["title"],
+                        "description": row["description"] or "",
+                        "author_name": row["author_name"] or "",
+                        "book_title": row["book_title"] or "",
+                        "year": row["year"] or "",
+                        "reference_type": row["reference_type"] or "",
+                        "reference_uuid": row["reference_uuid"] or "",
+                        "reference_slug": row["reference_slug"] or "",
+                        "reference_name": row["reference_name"] or "",
+                        "priority": (
+                            row["priority"] if row["priority"] is not None else ""
+                        ),
+                        "metadata_json": row["metadata"] or "",
+                    }
+                )
+
     def close(self):
         """Закрывает соединение с БД"""
         if self.conn:
@@ -275,70 +433,70 @@ class LiteraryCalendarDatabase:
 # Пример использования
 if __name__ == "__main__":
     db = LiteraryCalendarDatabase()
-    
+
     # Пример 1: День рождения Пушкина с книгами
     event_id = db.add_event(
         month=6,
         day=6,
-        event_type='birthday',
-        title='День рождения Александра Сергеевича Пушкина',
-        description='Родился величайший русский поэт',
-        author_name='Александр Пушкин',
-        year=1799
+        event_type="birthday",
+        title="День рождения Александра Сергеевича Пушкина",
+        description="Родился величайший русский поэт",
+        author_name="Александр Пушкин",
+        year=1799,
     )
-    
+
     # Добавляем ссылку на автора в API
     db.add_reference(
         event_id=event_id,
-        reference_type='author',
-        reference_uuid='550e8400-e29b-41d4-a716-446655440000',  # UUID автора в вашем API
-        reference_name='Александр Пушкин',
-        priority=0
+        reference_type="author",
+        reference_uuid="550e8400-e29b-41d4-a716-446655440000",  # UUID автора в вашем API
+        reference_name="Александр Пушкин",
+        priority=0,
     )
-    
+
     # Добавляем конкретную книгу
     db.add_reference(
         event_id=event_id,
-        reference_type='book',
-        reference_uuid='660e8400-e29b-41d4-a716-446655440001',
-        reference_slug='evgenij-onegin',
-        reference_name='Евгений Онегин',
+        reference_type="book",
+        reference_uuid="660e8400-e29b-41d4-a716-446655440001",
+        reference_slug="evgenij-onegin",
+        reference_name="Евгений Онегин",
         priority=1,
         metadata={
-            'cover_url': 'https://example.com/images/covers/onegin.jpg',
-            'annotation': 'Роман в стихах'
-        }
+            "cover_url": "https://example.com/images/covers/onegin.jpg",
+            "annotation": "Роман в стихах",
+        },
     )
-    
+
     # Пример 2: Памятный день литературы с тегом
     event_id = db.add_event(
         month=3,
         day=21,
-        event_type='memorable_day',
-        title='Всемирный день поэзии',
-        description='Отмечается по решению ЮНЕСКО'
+        event_type="memorable_day",
+        title="Всемирный день поэзии",
+        description="Отмечается по решению ЮНЕСКО",
     )
-    
+
     db.add_reference(
         event_id=event_id,
-        reference_type='tag',
-        reference_uuid='770e8400-e29b-41d4-a716-446655440002',
-        reference_name='Поэзия',
-        priority=0
+        reference_type="tag",
+        reference_uuid="770e8400-e29b-41d4-a716-446655440002",
+        reference_name="Поэзия",
+        priority=0,
     )
-    
+
     # Экспорт в CSV
-    db.export_to_csv('literary_calendar.csv')
-    
+    db.export_to_csv("literary_calendar.csv")
+
     print("✅ База данных создана и экспортирована в CSV")
     print("📅 Пример событий добавлен")
-    
+
     # Проверка: получаем события на 6 июня
     events = db.get_events_by_date(6, 6)
     print(f"\n📚 События на 6 июня: {len(events)}")
     for event in events:
         print(f"  - {event['title']}")
-        for ref in event['references']:
+        for ref in event["references"]:
             print(f"    → {ref['reference_type']}: {ref['reference_name']}")
-    
+
     db.close()

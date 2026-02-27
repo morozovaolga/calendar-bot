@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📚 Редактор Литературного Календаря</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📚 Литературный Календарь 2025</h1>
+            <p>Веб-интерфейс для управления событиями и ссылками на книги</p>
+        </div>
+
+        <div class="content">
+            <div id="message"></div>
+
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="stat-value" id="total-events">0</div>
+                    <div class="stat-label">Всего событий</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="today-events">0</div>
+                    <div class="stat-label">Событий сегодня</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="total-references">0</div>
+                    <div class="stat-label">Ссылок на книги</div>
+                </div>
+            </div>
+
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('view', this)">📖 Просмотр</button>
+                <button class="tab-btn" onclick="switchTab('add', this)">➕ Добавить</button>
+                <button class="tab-btn" onclick="switchTab('references', this)">🔗 Ссылки на книги</button>
+            </div>
+
+            <!-- Таб Просмотр -->
+            <div id="view" class="tab-content active">
+                <div class="search-box">
+                    <input type="text" id="search" placeholder="🔍 Поиск по названию события..."
+                           onkeyup="searchEvents()" style="max-width: 100%;">
+                </div>
+                <table class="events-table">
+                    <thead>
+                        <tr>
+                            <th>📅 Дата</th>
+                            <th>📝 Название</th>
+                            <th>✏️ Описание</th>
+                            <th>📜 Год/дата</th>
+                            <th>🔗 Ссылки</th>
+                            <th>⚙️ Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody id="events-table-body">
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Таб Добавление -->
+            <div id="add" class="tab-content">
+                <h2>➕ Добавить новое событие</h2>
+                <form onsubmit="addEvent(event)">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="day">День (1-31)</label>
+                            <input type="number" id="day" min="1" max="31" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="month">Месяц</label>
+                            <select id="month" required>
+                                <option value="">Выберите месяц</option>
+                                <option value="1">Январь</option>
+                                <option value="2">Февраль</option>
+                                <option value="3">Март</option>
+                                <option value="4">Апрель</option>
+                                <option value="5">Май</option>
+                                <option value="6">Июнь</option>
+                                <option value="7">Июль</option>
+                                <option value="8">Август</option>
+                                <option value="9">Сентябрь</option>
+                                <option value="10">Октябрь</option>
+                                <option value="11">Ноябрь</option>
+                                <option value="12">Декабрь</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="title">Название события *</label>
+                        <input type="text" id="title" placeholder="Например: День рождения А.С. Пушкина" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="event_type">Тип события</label>
+                        <select id="event_type">
+                            <option value="литературное событие">Литературное событие</option>
+                            <option value="день рождения">День рождения</option>
+                            <option value="смерти">День смерти</option>
+                            <option value="юбилей">Юбилей</option>
+                            <option value="памятная дата">Памятная дата</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="year">Год или дата события</label>
+                        <input type="text" id="year" placeholder="Например: 1799 или 1799-06-06">
+                        <small>Используется для расчёта возраста/юбилеев</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="description">Описание</label>
+                        <textarea id="description" placeholder="Краткое описание события..."></textarea>
+                    </div>
+
+                    <button type="submit" class="btn-primary">✅ Добавить событие</button>
+                </form>
+            </div>
+
+            <!-- Таб Ссылки -->
+            <div id="references" class="tab-content">
+                <h2>🔗 Управление ссылками на книги</h2>
+                <p>Выберите событие и добавьте ссылку на книгу или автора:</p>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="event-month-select">Выберите месяц</label>
+                        <select id="event-month-select" onchange="loadEventsByMonth()">
+                            <option value="">-- Выберите месяц --</option>
+                            <option value="1">Январь</option>
+                            <option value="2">Февраль</option>
+                            <option value="3">Март</option>
+                            <option value="4">Апрель</option>
+                            <option value="5">Май</option>
+                            <option value="6">Июнь</option>
+                            <option value="7">Июль</option>
+                            <option value="8">Август</option>
+                            <option value="9">Сентябрь</option>
+                            <option value="10">Октябрь</option>
+                            <option value="11">Ноябрь</option>
+                            <option value="12">Декабрь</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="event-select">Выберите событие</label>
+                        <select id="event-select" onchange="loadEventReferences()" disabled>
+                            <option value="">-- Сначала выберите месяц --</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="references-list"></div>
+
+                <h3 style="margin-top: 30px;">➕ Добавить новую ссылку</h3>
+                <form onsubmit="addReference(event)">
+                    <div class="form-group">
+                        <label for="ref-type">Тип ссылки</label>
+                        <select id="ref-type" required>
+                            <option value="author">Автор</option>
+                            <option value="book">Книга</option>
+                            <option value="tag">Тег</option>
+                            <option value="category">Категория</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="ref-name">Название/Имя *</label>
+                        <input type="text" id="ref-name" placeholder="Например: А.С. Пушкин" required>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="ref-uuid">UUID (опционально)</label>
+                            <input type="text" id="ref-uuid" placeholder="author-123">
+                        </div>
+                        <div class="form-group">
+                            <label for="ref-slug">Slug (опционально)</label>
+                            <input type="text" id="ref-slug" placeholder="author-slug">
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn-primary">🔗 Добавить ссылку</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно для редактирования события -->
+    <div id="editModal" class="modal" onclick="if(event.target === this) closeModal()">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>✏️ Редактировать событие</h2>
+                <button type="button" class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <form onsubmit="updateEvent(event)">
+                <input type="hidden" id="edit-id">
+                <div class="form-group">
+                    <label for="edit-title">Название</label>
+                    <input type="text" id="edit-title" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit-description">Описание</label>
+                    <textarea id="edit-description"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="edit-year">Год или дата события</label>
+                    <input type="text" id="edit-year" placeholder="Например: 1799 или 1799-06-06">
+                    <small>Поле влияет на расчёт возрастов и юбилеев</small>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" class="btn-primary">💾 Сохранить</button>
+                    <button type="button" class="btn-secondary" onclick="closeModal()">Отмена</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Модальное окно для редактирования ссылки -->
+    <div id="referenceModal" class="modal" onclick="if(event.target === this) closeReferenceModal()">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>✏️ Редактировать ссылку</h2>
+                <button type="button" class="close-btn" onclick="closeReferenceModal()">&times;</button>
+            </div>
+            <form onsubmit="updateReference(event)">
+                <input type="hidden" id="edit-ref-id">
+                <input type="hidden" id="edit-event-id">
+                <div class="form-group">
+                    <label for="edit-ref-type">Тип ссылки</label>
+                    <select id="edit-ref-type" required>
+                        <option value="author">Автор</option>
+                        <option value="book">Книга</option>
+                        <option value="tag">Тег</option>
+                        <option value="category">Категория</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="edit-ref-name">Название/Имя</label>
+                    <input type="text" id="edit-ref-name" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-ref-uuid">UUID</label>
+                        <input type="text" id="edit-ref-uuid" placeholder="Опционально">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-ref-slug">Slug</label>
+                        <input type="text" id="edit-ref-slug" placeholder="Опционально">
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" class="btn-primary">💾 Сохранить</button>
+                    <button type="button" class="btn-secondary" onclick="closeReferenceModal()">Отмена</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
+

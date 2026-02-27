@@ -9,6 +9,8 @@ from typing import List, Tuple
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from time_utils import now_tz
+
 
 class TelegramCalendar:
     """Класс для создания inline-календаря в Telegram"""
@@ -20,8 +22,9 @@ class TelegramCalendar:
     
     DAYS_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
     
-    def __init__(self):
+    def __init__(self, timezone: str = "Europe/Moscow"):
         self.calendar = calendar.Calendar(firstweekday=0)  # Неделя начинается с понедельника
+        self.timezone = timezone
     
     @staticmethod
     def create_callback_data(action: str, year: int = None, month: int = None, day: int = None) -> str:
@@ -54,7 +57,7 @@ class TelegramCalendar:
         Returns:
             InlineKeyboardMarkup с календарём
         """
-        now = datetime.now()
+        now = now_tz(self.timezone)
         if year is None:
             year = now.year
         if month is None:
@@ -85,14 +88,11 @@ class TelegramCalendar:
                 else:
                     # Проверяем, не прошла ли эта дата
                     date = datetime(year, month, day)
-                    if date.date() < now.date():
-                        # Прошедшая дата - серая
-                        row.append(InlineKeyboardButton(f"·{day}·", callback_data="cal_IGNORE"))
-                    elif date.date() == now.date():
-                        # Сегодня - выделено
+                    if date.date() == now.date():
+                        # Сегодня — выделяем
                         row.append(InlineKeyboardButton(f"•{day}•", callback_data=self.create_callback_data("DAY", year, month, day)))
                     else:
-                        # Будущая дата - доступна для выбора
+                        # Любая другая дата — доступна
                         row.append(InlineKeyboardButton(str(day), callback_data=self.create_callback_data("DAY", year, month, day)))
             keyboard.append(row)
         
@@ -104,6 +104,38 @@ class TelegramCalendar:
         ]
         keyboard.append(bottom_row)
         
+        return InlineKeyboardMarkup(keyboard)
+
+    def create_year_selector(self, start_year: int = None, span: int = 12) -> InlineKeyboardMarkup:
+        """Создаёт упрощённый селектор годов.
+
+        Args:
+            start_year: первый год в списке (по умолчанию центрится на текущем годе)
+            span: количество лет в селекторе
+        """
+        now = now_tz(self.timezone)
+        if start_year is None:
+            start_year = now.year - span // 2
+
+        keyboard = []
+        row = []
+        per_row = 4
+        for i, y in enumerate(range(start_year, start_year + span)):
+            row.append(InlineKeyboardButton(str(y), callback_data=self.create_callback_data("YEAR", y, 0, 0)))
+            if (i + 1) % per_row == 0:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+
+        # Навигация по диапазонам
+        bottom_row = [
+            InlineKeyboardButton("« Предыдущие", callback_data=self.create_callback_data("CHANGE_YEARS", start_year - span, 0, 0)),
+            InlineKeyboardButton("Сегодня", callback_data=self.create_callback_data("TODAY", now.year, 0, 0)),
+            InlineKeyboardButton("Следующие »", callback_data=self.create_callback_data("CHANGE_YEARS", start_year + span, 0, 0))
+        ]
+        keyboard.append(bottom_row)
+
         return InlineKeyboardMarkup(keyboard)
     
     def process_selection(self, callback_data: str) -> Tuple[bool, datetime, InlineKeyboardMarkup]:
@@ -117,7 +149,7 @@ class TelegramCalendar:
             Кортеж (завершён_выбор, выбранная_дата, новая_клавиатура)
         """
         action, year, month, day = self.parse_callback_data(callback_data)
-        now = datetime.now()
+        now = now_tz(self.timezone)
         
         if action == "IGNORE":
             return False, None, None
@@ -157,5 +189,13 @@ class TelegramCalendar:
         elif action == "NEXT_YEAR":
             # Следующий год
             return False, None, self.create_calendar(year + 1, month)
+
+        elif action == "YEAR":
+            # Выбран год в селекторе годов
+            return True, datetime(year, 1, 1), None
+
+        elif action == "CHANGE_YEARS":
+            # Показать другой диапазон годов (year содержит стартовый год)
+            return False, None, self.create_year_selector(start_year=year)
         
         return False, None, None

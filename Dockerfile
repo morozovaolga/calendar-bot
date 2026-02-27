@@ -3,8 +3,8 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Копируем зависимости
-COPY requirements_bot.txt .
-RUN pip install --no-cache-dir -r requirements_bot.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Копируем код
 COPY . .

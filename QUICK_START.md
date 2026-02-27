@@ -28,6 +28,8 @@ python -c "from literary_calendar_database import LiteraryCalendarDatabase as DB
 python -c "from literary_calendar_database import LiteraryCalendarDatabase as DB; db = DB(); db.import_from_csv('events.csv'); print('✅ Готово')"
 ```
 
+> Примечание: `events.csv`/экспорты — локальные артефакты. Они добавлены в `.gitignore`, чтобы не засорять репозиторий.
+
 📝 **Формат CSV:**
 ```
 month,day,event_type,title,description,author_name,book_title,year

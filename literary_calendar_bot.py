@@ -4,23 +4,26 @@ Telegram-бот для ежедневной рассылки литератур�
 """
 
 import asyncio
+import json
 import logging
 import re
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from urllib.parse import urlparse, parse_qs
 
-import httpx
-from telegram import Bot, InputMediaPhoto
-from telegram.error import TelegramError
+from dotenv import load_dotenv
+from telegram import Bot
 
+from bot.formatting import (
+    extract_image_url_from_metadata,
+    format_event_message,
+    get_age_word,
+)
+from clients.graphql_client import GraphQLClient
 from literary_calendar_database import LiteraryCalendarDatabase
-
-try:
-    from bs4 import BeautifulSoup
-    HAS_BS4 = True
-except ImportError:
-    HAS_BS4 = False
+from time_utils import now_tz
+from services.digest_service import DigestService
+from services.jubilee_service import JubileeService
 
 # Настройка логирования
 logging.basicConfig(
@@ -56,104 +59,36 @@ class LiteraryCalendarBot:
         self.graphql_endpoint = graphql_endpoint
         self.timezone = timezone
         self.send_hour = send_hour
+        self._gql = GraphQLClient(graphql_endpoint)
+        self._digest = DigestService(bot=self.bot, gql=self._gql, timezone=self.timezone)
+        self._jubilees = JubileeService(bot=self.bot)
+
+    async def aclose(self):
+        await self._gql.aclose()
     
+    @staticmethod
+    def extract_image_url_from_metadata(metadata) -> str:
+        return extract_image_url_from_metadata(metadata)
+
+    @staticmethod
+    def get_age_word(age: int) -> str:
+        return get_age_word(age)
+
     async def get_books_by_author(self, author_uuid: str) -> List[Dict]:
         """Получает книги автора через GraphQL API"""
-        query = """
-        query GetBooksByAuthor($authorUuid: String!) {
-          books(body: {
-            authors: [$authorUuid]
-            isActive: true
-            limit: 5
-          }) {
-            uuid
-            name
-            slug
-            annotation
-            image {
-              url
-            }
-          }
-        }
-        """
-        
-        variables = {"authorUuid": author_uuid}
-        
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    self.graphql_endpoint,
-                    json={"query": query, "variables": variables},
-                    headers={"Content-Type": "application/json"},
-                    timeout=30.0
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    if 'data' in data and 'books' in data['data']:
-                        return data['data']['books']
-                else:
-                    logger.error(f"Ошибка API: {response.status_code}")
-        except Exception as e:
-            logger.error(f"Ошибка запроса к API: {e}")
-        
-        return []
+        return await self._gql.get_books_by_author(author_uuid)
+
+    async def get_books_by_author_slug(self, author_slug: str) -> List[Dict]:
+        """Получает книги автора по slug через GraphQL API (фолбэк, если uuid не даёт результата)"""
+        return await self._gql.get_books_by_author_slug(author_slug)
+    
+    async def get_book_by_uuid(self, book_uuid: str) -> Optional[Dict]:
+        """Получает информацию о книге по UUID через GraphQL API"""
+        return await self._gql.get_book_by_uuid(book_uuid)
     
     async def search_books_by_title(self, title: str, author_name: str = None) -> List[Dict]:
         """Ищет книги по названию и автору через GraphQL API"""
-        # Очищаем название от лишних символов
-        clean_title = re.sub(r'[«»""„‟]', '', title).strip()
-        
-        query = """
-        query SearchBooks($names: [String!]!) {
-          books(body: {
-            names: $names
-            isActive: true
-            limit: 6
-          }) {
-            uuid
-            name
-            slug
-            annotation
-            authors {
-              uuid
-            }
-            image {
-              url
-            }
-          }
-        }
-        """
-        
-        # Формируем список названий для поиска
-        search_names = [clean_title]
-        if author_name:
-            # Также добавим версию с именем автора
-            search_names.append(f"{author_name} {clean_title}")
-        
-        variables = {"names": search_names}
-        
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    self.graphql_endpoint,
-                    json={"query": query, "variables": variables},
-                    headers={"Content-Type": "application/json"},
-                    timeout=30.0
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    if 'data' in data and 'books' in data['data']:
-                        books = data['data']['books']
-                        logger.info(f"Найдено книг по запросу '{clean_title}': {len(books)}")
-                        return books
-                    else:
-                        logger.warning(f"Нет данных в ответе API для запроса '{clean_title}'")
-                else:
-                    logger.error(f"Ошибка API поиска книг (code {response.status_code}): {response.text[:200]}")
-        except Exception as e:
-            logger.error(f"Ошибка запроса поиска книг: {e}")
-        
-        return []
+        return await self._gql.search_books_by_title(title=title, author_name=author_name)
     
     def extract_book_info_from_title(self, title: str) -> Dict[str, str]:
         """Извлекает название книги и автора из заголовка события"""
@@ -175,193 +110,24 @@ class LiteraryCalendarBot:
     
     async def get_books_by_tag(self, tag: str) -> List[Dict]:
         """Получает книги по тегу через GraphQL API"""
-        query = """
-        query GetBooksByTag($tagSlug: String!) {
-          tags(body: {
-            slugs: [$tagSlug]
-          }) {
-            uuid
-            name
-            books(limit: 6) {
-              uuid
-              name
-              slug
-              image {
-                url
-              }
-            }
-          }
-        }
-        """
-        
-        variables = {"tagSlug": tag}
-        
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    self.graphql_endpoint,
-                    json={"query": query, "variables": variables},
-                    headers={"Content-Type": "application/json"},
-                    timeout=30.0
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    if 'data' in data:
-                        if 'tags' in data['data'] and data['data']['tags']:
-                            tag_data = data['data']['tags'][0]
-                            if 'books' in tag_data:
-                                return tag_data['books']
-        except Exception as e:
-            logger.error(f"Ошибка запроса к API по тегу: {e}")
-        
-        return []
+        return await self._gql.get_books_by_tag(tag)
 
     async def get_books_by_category(self, category_uuid: str) -> List[Dict]:
         """Получает книги по категории через GraphQL API"""
-        query = """
-        query GetBooksByCategory($categoryUuid: String!) {
-          category(body: { uuid: $categoryUuid }) {
-            uuid
-            name
-            books(limit: 6) {
-              uuid
-              name
-              slug
-              image { 
-                url 
-              }
-            }
-          }
-        }
-        """
-
-        variables = {"categoryUuid": category_uuid}
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    self.graphql_endpoint,
-                    json={"query": query, "variables": variables},
-                    headers={"Content-Type": "application/json"},
-                    timeout=30.0
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    if 'data' in data and data['data'].get('category'):
-                        books = data['data']['category'].get('books', [])
-                        return books
-        except Exception as e:
-            logger.error(f"Ошибка запроса к API по категории: {e}")
-
-        return []
+        return await self._gql.get_books_by_category(category_uuid)
     
     def format_event_message(self, event: Dict, books: List[Dict] = None, include_image_urls: bool = True, other_links: List[Dict] = None) -> str:
-        """Форматирует сообщение о событии с ссылками на книги.
-
-        Args:
-            include_image_urls: если False, не добавлять в текст явные URL обложек
-        """
-        message_parts = []
-        
-        # Заголовок
-        message_parts.append(f"📚 <b>{event['title']}</b>")
-        
-        # Дата (по русски)
-        if event.get('start_date'):
-            months = [
-                'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
-                'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
-            ]
-            date_obj = event['start_date']
-            month_name = months[date_obj.month - 1]
-            date_str = f"{date_obj.day} {month_name} {date_obj.year}"
-            message_parts.append(f"📅 {date_str}")
-        
-        # Если это день рождения - добавляем "N лет со дня рождения"
-        if event.get('event_type') == 'день рождения':
-            # Для дней рождения всегда пытаемся извлечь год из названия (т.к. в БД часто неправильный год)
-            birth_year = None
-            
-            # Извлекаем год из названия события (например, "Чехов родился в 1860 году")
-            year_match = re.search(r'\b(1[0-9]{3}|2[0-2][0-9]{2})\b', event.get('title', ''))
-            if year_match:
-                # Первый найденный год - это обычно год рождения
-                birth_year = int(year_match.group(1))
-            
-            # Если не смогли извлечь из названия, пробуем из поля 'year', но только если оно разумное
-            if not birth_year and event.get('year'):
-                year_val = event.get('year')
-                # Проверяем, что год выглядит разумно (1600-1999)
-                if isinstance(year_val, int) and 1600 <= year_val <= 1999:
-                    birth_year = year_val
-            
-            if birth_year:
-                current_date = event.get('start_date', datetime.now())
-                # Рассчитываем возраст на дату события (текущего года)
-                age = current_date.year - birth_year
-                
-                if age > 0:  # Только если возраст положительный
-                    # Проверяем, является ли это юбилеем (оканчивается на 0 или 5)
-                    is_jubilee = age % 10 == 0 or age % 10 == 5
-                    
-                    if is_jubilee:
-                        # Юбилей - выделяем жирным и подчёркиванием
-                        message_parts.append(f"🎂 <u><b>🎉 {age} лет со дня рождения 🎉</b></u>")
-                    else:
-                        message_parts.append(f"🎂 {age} лет со дня рождения")
-        
-        # Описание (без обрезания)
-        if event.get('description'):
-            desc = event['description']
-            message_parts.append(f"\n{desc}")
-
-        # Ссылки на авторов/теги/категории (если есть)
-        if other_links:
-            message_parts.append("\n🔗 <b>Ссылки:</b>")
-            for l in other_links:
-                name = l.get('name') or ''
-                url = l.get('url') or ''
-                if url:
-                    # Добавляем ссылку с новой строки для читаемости
-                    message_parts.append(f"\n• <a href='{url}'>{name}</a>")
-                else:
-                    message_parts.append(f"\n• {name}")
-        
-        # Книги с обложками и ссылками
-        if books:
-            message_parts.append("\n📖 <b>Книги:</b>")
-            
-            for book in books[:6]:  # Максимум 6 книг
-                book_name = book.get('name', 'Без названия')
-                book_slug = book.get('slug', '')
-                metadata = book.get('metadata', {}) or {}
-                
-                # Формируем ссылку на книгу
-                if book_slug:
-                    book_url = f"https://example.com/catalog/{book_slug}"
-                    message_parts.append(f"• <a href='{book_url}'>{book_name}</a>")
-                else:
-                    message_parts.append(f"• {book_name}")
-                
-                # Добавляем информацию об обложке если есть (опционально в тексте)
-                image_data = metadata.get('image', {}) or {}
-                if include_image_urls and isinstance(image_data, dict):
-                    image_url = image_data.get('url', '')
-                    if image_url:
-                        message_parts.append(f"  <i>Обложка: {image_url}</i>")
-                
-                # Аннотация
-                annotation = metadata.get('annotation', '')
-                if annotation:
-                    message_parts.append(f"  <i>{annotation[:100]}</i>")
-        else:
-            message_parts.append("\n<i>Нет информации о книгах в каталоге</i>")
-        
-        return "\n".join(message_parts)
+        return format_event_message(
+            event=event,
+            timezone=self.timezone,
+            books=books,
+            include_image_urls=include_image_urls,
+            other_links=other_links,
+        )
     
     async def get_today_events(self) -> List[Dict]:
         """Получает события на сегодня"""
-        now = datetime.now()
+        now = now_tz(self.timezone)
         return await self.get_events_by_date(now)
     
     async def get_events_by_date(self, date: datetime) -> List[Dict]:
@@ -404,7 +170,11 @@ class LiteraryCalendarBot:
                     metadata = ref.get('metadata', {}) or {}
 
                     if ref_type == 'author' and ref_uuid:
-                        event_dict['author_refs'].append({'uuid': ref_uuid, 'name': ref_name})
+                        event_dict['author_refs'].append({
+                            'uuid': ref_uuid, 
+                            'name': ref_name,
+                            'slug': ref.get('reference_slug', '')
+                        })
                         logger.debug(f"Добавлен автор: {ref_name} ({ref_uuid})")
 
                     elif ref_type == 'book' and ref_uuid:
@@ -436,6 +206,28 @@ class LiteraryCalendarBot:
         except Exception as e:
             logger.error(f"Ошибка получения событий: {e}", exc_info=True)
             return []
+
+    async def get_jubilees_for_year(self, year: int) -> List[Dict]:
+        """Возвращает список юбиляров для указанного года (возраст и ссылки)."""
+        try:
+            db = LiteraryCalendarDatabase()
+            jubilees = db.get_jubilees_by_year(year)
+            db.close()
+            return jubilees
+        except Exception as e:
+            logger.error(f"Ошибка получения юбиляров: {e}", exc_info=True)
+            return []
+    
+    async def send_jubilees_for_year(self, chat_id: str, year: int):
+        """Получает и отправляет список юбиляров для указанного года с разбивкой по месяцам."""
+        jubilees = await self.get_jubilees_for_year(year)
+        await self._jubilees.send_jubilees_for_year(chat_id=chat_id, year=year, jubilees=jubilees)
+    
+    async def collect_books_and_links(self, event: Dict) -> Tuple[List[Dict], List[Dict]]:
+        return await self._digest.collect_books_and_links(event)
+    
+    async def send_event_with_media(self, chat_id: str, event: Dict):
+        await self._digest.send_event_with_media(chat_id, event)
     
     async def send_daily_digest(self, chat_id: str):
         """Отправляет ежедневную рассылку с событиями и ссылками на книги"""
@@ -446,165 +238,14 @@ class LiteraryCalendarBot:
                 logger.info("Нет событий на сегодня")
                 await self.bot.send_message(
                     chat_id=chat_id,
-                    text="На сегодня в календаре пока что нет событий.",
+                    text="На этот день в календаре пока что нет событий.",
                     parse_mode='HTML'
                 )
                 return
             
             # Отправляем каждое событие отдельным сообщением
             for event in events:
-                books = []
-                other_links = []  # ссылки на авторов/тегов/категорий для текста
-                
-                # 1. Сначала добавляем книги из references БД (они уже есть)
-                for book_ref in event.get('book_references', []):
-                    books.append({
-                        'uuid': book_ref['uuid'],
-                        'name': book_ref['name'],
-                        'slug': book_ref['slug'],
-                        'metadata': book_ref.get('metadata', {}),
-                        'source': 'database'
-                    })
-                    logger.debug(f"Добавлена книга из БД: {book_ref['name']}")
-                
-                # 2. Ищем книги по названию и автору из заголовка
-                book_info = self.extract_book_info_from_title(event['title'])
-                if book_info['book_title']:
-                    found_books = await self.search_books_by_title(
-                        book_info['book_title'], 
-                        book_info['author']
-                    )
-                    for book in found_books:
-                        # Избегаем дубликатов
-                        if not any(b.get('uuid') == book.get('uuid') for b in books):
-                            books.append({
-                                'uuid': book.get('uuid'),
-                                'name': book.get('name', 'Без названия'),
-                                'slug': book.get('slug', ''),
-                                'metadata': {'image': book.get('image', {})},
-                                'source': 'api_search'
-                            })
-                            logger.debug(f"Найдена книга по запросу: {book.get('name')}")
-                
-                # 3. Получаем книги по UUID авторов (и формируем ссылку на автора)
-                for author_ref in event.get('author_refs', []):
-                    au_uuid = author_ref.get('uuid')
-                    au_name = author_ref.get('name') or ''
-                    # ссылка на поиск по автору на сайте
-                    author_url = f"https://example.com/catalog?authors={au_uuid}&page=1"
-                    other_links.append({'type': 'author', 'name': au_name or 'Автор', 'url': author_url})
-                    # получаем книги автора (для обложек)
-                    author_books = await self.get_books_by_author(au_uuid)
-                    for book in author_books:
-                        if not any(b.get('uuid') == book.get('uuid') for b in books):
-                            books.append({
-                                'uuid': book.get('uuid'),
-                                'name': book.get('name', 'Без названия'),
-                                'slug': book.get('slug', ''),
-                                'metadata': {'image': book.get('image', {})},
-                                'source': 'author_api'
-                            })
-                            logger.debug(f"Найдена книга по автору: {book.get('name')}")
-                
-                # 4. Получаем книги по тегам (и формируем ссылки на теги)
-                for tag_ref in event.get('tag_refs', []):
-                    tag_uuid = tag_ref.get('uuid')
-                    tag_name = tag_ref.get('name') or ''
-                    tag_url = f"https://example.com/catalog?tags={tag_uuid}&page=1"
-                    other_links.append({'type': 'tag', 'name': tag_name or 'Тег', 'url': tag_url})
-                    tag_books = await self.get_books_by_tag(tag_uuid)
-                    for book in tag_books:
-                        if not any(b.get('uuid') == book.get('uuid') for b in books):
-                            books.append({
-                                'uuid': book.get('uuid'),
-                                'name': book.get('name', 'Без названия'),
-                                'slug': book.get('slug', ''),
-                                'metadata': {'image': book.get('image', {})} if book.get('image') else {},
-                                'source': 'tag_api'
-                            })
-                            logger.debug(f"Найдена книга по тегу: {book.get('name')}")
-                
-                # 5. Если нет ни одной ссылки - генерируем поиск по названию события
-                if not other_links and not books:
-                    # Генерируем URL для поиска по названию события
-                    event_title_clean = event['title'].strip()
-                    search_url = f"https://example.com/catalog?search={event_title_clean.replace(' ', '+')}&page=1"
-                    other_links.append({'type': 'search', 'name': event_title_clean, 'url': search_url})
-                    logger.debug(f"Сгенерирована ссылка поиска для события: {event_title_clean}")
-                    
-                    # Пытаемся найти книги по названию события через API
-                    search_books = await self.search_books_by_title(event_title_clean)
-                    for book in search_books[:10]:  # берём до 10 книг
-                        if not any(b.get('uuid') == book.get('uuid') for b in books):
-                            books.append({
-                                'uuid': book.get('uuid'),
-                                'name': book.get('name', 'Без названия'),
-                                'slug': book.get('slug', ''),
-                                'metadata': {'image': book.get('image', {})} if book.get('image') else {},
-                                'source': 'auto_search'
-                            })
-                            logger.debug(f"Найдена книга по названию события: {book.get('name')}")
-                
-                # Формируем и отправляем медиа (обложки) + текст
-                # Сначала собираем доступные обложки — но не больше 6
-                media_items = []
-                for book in books:
-                    if len(media_items) >= 6:
-                        break
-                    metadata = book.get('metadata', {}) or {}
-                    image_data = metadata.get('image', {}) or {}
-                    image_url = ''
-                    if isinstance(image_data, dict):
-                        image_url = image_data.get('url', '')
-                    elif isinstance(image_data, str):
-                        image_url = image_data
-
-                    if image_url:
-                        # Ссылка на карточку книги (если есть slug)
-                        book_slug = book.get('slug', '')
-                        if book_slug:
-                            book_url = f"https://example.com/catalog/{book_slug}"
-                        else:
-                            book_url = ''
-
-                        # подпись под изображением — название (ссылка если есть)
-                        caption = book.get('name', '')
-                        if book_url:
-                            caption = f"<a href='{book_url}'>{caption}</a>"
-
-                        try:
-                            media_items.append(InputMediaPhoto(media=image_url, caption=caption))
-                        except Exception:
-                            logger.debug(f"Невозможно создать InputMediaPhoto для {image_url}")
-
-                # Если есть медиа — отправляем группу
-                if media_items:
-                    try:
-                        # Telegram принимает до 10 медиа в группе, мы посылаем не больше 6
-                        await self.bot.send_media_group(chat_id=chat_id, media=media_items[:6])
-                        await asyncio.sleep(0.5)
-                    except TelegramError as e:
-                        logger.warning(f"Не удалось отправить media_group: {e}")
-
-                    # После отправки картинок отправляем текст без явных URL обложек и без предпросмотра
-                    message = self.format_event_message(event, books, include_image_urls=False, other_links=other_links)
-                    disable_preview = True
-                else:
-                    # Если обложек нет — отправляем обычное текстовое сообщение (с URL обложек если они есть в metadata)
-                    message = self.format_event_message(event, books, include_image_urls=True, other_links=other_links)
-                    disable_preview = False
-
-                try:
-                    await self.bot.send_message(
-                        chat_id=chat_id,
-                        text=message,
-                        parse_mode='HTML',
-                        disable_web_page_preview=disable_preview
-                    )
-                    logger.info(f"Отправлено событие: {event['title']} (книг: {len(books)})")
-                    await asyncio.sleep(1)
-                except TelegramError as e:
-                    logger.error(f"Ошибка отправки сообщения: {e}")
+                await self.send_event_with_media(chat_id, event)
             
         except Exception as e:
             logger.error(f"Ошибка при отправке рассылки: {e}", exc_info=True)
@@ -615,7 +256,7 @@ class LiteraryCalendarBot:
         
         while True:
             try:
-                now = datetime.now()
+                now = now_tz(self.timezone)
                 if now.hour == self.send_hour and now.minute == 0:
                     # Здесь нужен chat_id для отправки
                     logger.warning("Автоматическая рассылка требует chat_id. Используйте /send_events_for_today")
@@ -629,6 +270,7 @@ class LiteraryCalendarBot:
 
 async def main():
     """Главная функция для запуска бота"""
+    load_dotenv()
     from literary_calendar_bot_config import (
         BOT_TOKEN,
         CALENDAR_URL,
@@ -636,6 +278,9 @@ async def main():
         SEND_HOUR,
         TIMEZONE
     )
+
+    if not BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN не задан. Укажите его в переменных окружения или в файле .env")
 
     bot = LiteraryCalendarBot(
         bot_token=BOT_TOKEN,

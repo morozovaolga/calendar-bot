@@ -27,6 +27,25 @@ build/
 .env.local
 .env.prod
 
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Local exports / data artifacts
+events.csv
+export_events.csv
+event_references.csv
+literary_calendar.csv
+authors.csv
+authors.xlsx
+authors_with_bio.xlsx
+birthdays.xlsx
+table.html
+test_output.txt
+new-calend.txt
+literary_events.txt
+
 # API schemas
 schema.graphql
 
